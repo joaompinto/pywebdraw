@@ -5,11 +5,17 @@ export class Shape {
         this.rotation = props.rotation || 0;
 
         if (type === 'circle') {
-            this.x = props.x;
-            this.y = props.y;
-            this.size = props.size;
+            // Circle uses centerX, centerY, radius
+            this.centerX = props.centerX;
+            this.centerY = props.centerY;
+            this.radius = props.radius;
+            // Also store bounds for selection box
+            this.x1 = this.centerX - this.radius;
+            this.y1 = this.centerY - this.radius;
+            this.x2 = this.centerX + this.radius;
+            this.y2 = this.centerY + this.radius;
         } else {
-            // All other shapes use absolute coordinates
+            // Other shapes use absolute coordinates
             this.x1 = props.x1;
             this.y1 = props.y1;
             this.x2 = props.x2;
@@ -21,38 +27,37 @@ export class Shape {
         ctx.save();
         ctx.strokeStyle = this.color;
         ctx.fillStyle = this.color;
+        ctx.lineWidth = 2;
 
         switch(this.type) {
             case 'rectangle': {
-                const width = this.x2 - this.x1;
-                const height = this.y2 - this.y1;
-                ctx.fillRect(this.x1, this.y1, width, height);
+                ctx.fillRect(this.x1, this.y1, this.x2 - this.x1, this.y2 - this.y1);
                 break;
             }
-            case 'circle':
+            case 'circle': {
                 ctx.beginPath();
-                ctx.arc(this.x + this.size, this.y + this.size, this.size, 0, Math.PI * 2);
+                ctx.arc(this.centerX, this.centerY, this.radius, 0, Math.PI * 2);
                 ctx.fill();
-                ctx.stroke();
                 break;
+            }
             case 'triangle': {
-                const width = this.x2 - this.x1;
-                const height = this.y2 - this.y1;
                 ctx.beginPath();
-                ctx.moveTo(this.x1 + width/2, this.y1);
+                ctx.moveTo(this.x1 + (this.x2 - this.x1)/2, this.y1);
                 ctx.lineTo(this.x1, this.y2);
                 ctx.lineTo(this.x2, this.y2);
                 ctx.closePath();
                 ctx.fill();
                 break;
             }
-            case 'line':
+            case 'line': {
                 ctx.beginPath();
                 ctx.moveTo(this.x1, this.y1);
                 ctx.lineTo(this.x2, this.y2);
                 ctx.stroke();
                 break;
+            }
         }
+        
         ctx.restore();
     }
 }

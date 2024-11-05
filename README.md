@@ -51,10 +51,8 @@ The application uses a simple text-based language to describe shapes on the canv
 
 ### Shape Types and Parameters
 
-All shapes use absolute coordinate pairs (x1,y1,x2,y2):
-
 1. **Rectangle**: `rect(x1 y1 x2 y2)`
-2. **Circle**: `circle(x1 y1 x2 y2)` - where x2,y2 defines bounding box
+2. **Circle**: `circle(centerX centerY radius)`
 3. **Triangle**: `tri(x1 y1 x2 y2)` - where x2,y2 defines bounding box
 4. **Line**: `line(x1 y1 x2 y2)`
 

@@ -60,14 +60,18 @@ export class CanvasManager {
         if (this.state.isDrawing && this.state.startPoint && this.state.lastPoint) {
             let previewShape;
             if (this.currentTool === 'circle') {
-                previewShape = new Shape(this.currentTool, {
-                    x: this.state.lastPoint.x - this.state.radius,
-                    y: this.state.lastPoint.y - this.state.radius,
-                    size: this.state.radius,
+                // Use initial click as center, current mouse position determines radius
+                const radius = Math.hypot(
+                    this.state.lastPoint.x - this.state.startPoint.x,
+                    this.state.lastPoint.y - this.state.startPoint.y
+                );
+                previewShape = new Shape('circle', {
+                    centerX: this.state.startPoint.x,
+                    centerY: this.state.startPoint.y,
+                    radius: radius,
                     color: this.currentColor
                 });
             } else {
-                // Fix: Create preview shape using x1,y1,x2,y2 coordinates
                 previewShape = new Shape(this.currentTool, {
                     x1: this.state.startPoint.x,
                     y1: this.state.startPoint.y,
@@ -89,15 +93,20 @@ export class CanvasManager {
         switch(shape.type) {
             case 'rectangle':
             case 'triangle':
-            case 'circle':
-                shape.x += dx;
-                shape.y += dy;
-                break;
             case 'line':
                 shape.x1 += dx;
                 shape.y1 += dy;
                 shape.x2 += dx;
                 shape.y2 += dy;
+                break;
+            case 'circle':
+                shape.centerX += dx;
+                shape.centerY += dy;
+                // Update bounds
+                shape.x1 = shape.centerX - shape.radius;
+                shape.y1 = shape.centerY - shape.radius;
+                shape.x2 = shape.centerX + shape.radius;
+                shape.y2 = shape.centerY + shape.radius;
                 break;
         }
     }
@@ -161,7 +170,7 @@ export class CanvasManager {
                 return;
             } else if (this.currentTool) {
                 this.state.isDrawing = true;
-                this.state.startPoint = mousePos;
+                this.state.startPoint = mousePos;  // This will be the circle center
                 this.state.lastPoint = mousePos;
                 if (this.currentTool === 'circle') {
                     this.state.radius = 0;
@@ -349,10 +358,15 @@ export class CanvasManager {
                 let shapeBounds;
                 
                 if (this.currentTool === 'circle') {
+                    // Create final circle using center point and radius
+                    const radius = Math.hypot(
+                        this.state.lastPoint.x - this.state.startPoint.x,
+                        this.state.lastPoint.y - this.state.startPoint.y
+                    );
                     shapeBounds = {
-                        x: this.state.lastPoint.x - this.state.radius,
-                        y: this.state.lastPoint.y - this.state.radius,
-                        size: this.state.radius,
+                        centerX: this.state.startPoint.x,
+                        centerY: this.state.startPoint.y,
+                        radius: radius,
                         color: this.currentColor
                     };
                 } else {
@@ -412,11 +426,13 @@ export class CanvasManager {
             
             let code = '';
             switch(shape.type) {
+                case 'circle':
+                    code = `circle(${Math.round(shape.centerX)} ${Math.round(shape.centerY)} ${Math.round(shape.radius)})${color}${rotation}`;
+                    break;
                 case 'rectangle':
                     code = `rect(${Math.round(shape.x1)} ${Math.round(shape.y1)} ${Math.round(shape.x2)} ${Math.round(shape.y2)})${color}${rotation}`;
                     break;
                 case 'triangle':
-                case 'circle':
                 case 'line':
                     code = `${shape.type}(${Math.round(shape.x1)} ${Math.round(shape.y1)} ${Math.round(shape.x2)} ${Math.round(shape.y2)})${color}${rotation}`;
                     break;
@@ -430,15 +446,12 @@ export class CanvasManager {
     applyCanvasText() {
         try {
             const text = this.canvasText.value;
-            // Update to handle // comments instead of #
             const lines = text.split('\n').filter(line => line.trim() && !line.trim().startsWith('//'));
             
             const newShapes = [];
             
             lines.forEach(line => {
-                if (line.trim().startsWith('//')) {
-                    return;
-                }
+                if (line.trim().startsWith('//')) return;
                 
                 const match = line.match(/(\w+)\(([^)]+)\)(?:\s+([#\w]+))?(?:\s+r(-?\d+))?/);
                 if (!match) {
@@ -453,20 +466,20 @@ export class CanvasManager {
                 const shapeColor = color || '#e74c3c';
                 
                 switch(type) {
+                    case 'circle':
+                        shape = new Shape('circle', {
+                            centerX: values[0],
+                            centerY: values[1],
+                            radius: values[2],
+                            color: shapeColor
+                        });
+                        break;
                     case 'rect':
                         shape = new Shape('rectangle', {
                             x1: values[0],
                             y1: values[1],
                             x2: values[2],
                             y2: values[3],
-                            color: shapeColor
-                        });
-                        break;
-                    case 'circ':
-                        shape = new Shape('circle', {
-                            x: values[0] - values[2],
-                            y: values[1] - values[2],
-                            size: values[2],
                             color: shapeColor
                         });
                         break;
@@ -489,23 +502,21 @@ export class CanvasManager {
                         });
                         break;
                 }
-                
+
                 if (shape && rotation) {
                     shape.rotation = Number(rotation) * Math.PI / 180;
                 }
-                
-                if (shape) {
-                    // Validate shape bounds
-                    if (this.isValidShape(shape)) {
-                        newShapes.push(shape);
-                    } else {
-                        console.warn(`Invalid shape bounds: ${line}`);
-                    }
+
+                if (shape && this.isValidShape(shape)) {
+                    newShapes.push(shape);
                 }
             });
             
-            // Only update shapes if parsing was successful
-            this.shapes = newShapes;
+            // Only update shapes if we have valid shapes
+            if (newShapes.length > 0) {
+                this.shapes = newShapes;
+                this.render();
+            }
         } catch (error) {
             console.error('Error parsing canvas text:', error);
         }
@@ -537,11 +548,11 @@ export class CanvasManager {
                        point.y <= Math.max(shape.y1, shape.y2);
             
             case 'circle': {
-                // Circle still uses x, y, size format
-                const centerX = shape.x + shape.size;
-                const centerY = shape.y + shape.size;
-                const distance = Math.hypot(point.x - centerX, point.y - centerY);
-                return distance <= shape.size;
+                const distance = Math.hypot(
+                    point.x - shape.centerX,
+                    point.y - shape.centerY
+                );
+                return distance <= shape.radius;
             }
             
             case 'triangle': {
@@ -628,48 +639,63 @@ export class CanvasManager {
     }
 
     resizeShape(shape, dx, dy, isLeft, isTop) {
-        // Log which corner is being moved
-        const corner = `${isTop ? 'Top' : 'Bottom'}-${isLeft ? 'Left' : 'Right'}`;
-        console.log(`Moving ${corner} corner`);
-
         switch(shape.type) {
-            case 'rectangle':
-            case 'triangle': {
-                // Store original coordinates for logging
-                const before = {x1: shape.x1, y1: shape.y1, x2: shape.x2, y2: shape.y2};
-                
-                if (isLeft && isTop) {
-                    shape.x1 += dx;
-                    shape.y1 += dy;
-                    console.log(`Top-Left: Changed (x1,y1) from (${before.x1},${before.y1}) to (${shape.x1},${shape.y1})`);
-                } else if (!isLeft && isTop) {
-                    shape.x2 += dx;
-                    shape.y1 += dy;
-                    console.log(`Top-Right: Changed (x2,y1) from (${before.x2},${before.y1}) to (${shape.x2},${shape.y1})`);
-                } else if (isLeft && !isTop) {
-                    shape.x1 += dx;
-                    shape.y2 += dy;
-                    console.log(`Bottom-Left: Changed (x1,y2) from (${before.x1},${before.y2}) to (${shape.x1},${shape.y2})`);
-                } else {
-                    shape.x2 += dx;
-                    shape.y2 += dy;
-                    console.log(`Bottom-Right: Changed (x2,y2) from (${before.x2},${before.y2}) to (${shape.x2},${shape.y2})`);
+            case 'circle': {
+                if (this.selectionBox.activeHandle?.isCircleHandle) {
+                    // Get the new handle position after movement
+                    const handle = this.selectionBox.activeHandle;
+                    const handlePos = {
+                        x: handle.x + dx,
+                        y: handle.y + dy
+                    };
+                    
+                    // Calculate new radius as distance from center to new handle position
+                    const newRadius = Math.hypot(
+                        handlePos.x - shape.centerX,
+                        handlePos.y - shape.centerY
+                    );
+                    
+                    // Update shape radius with minimum size limit
+                    shape.radius = Math.max(1, newRadius);
+                    
+                    // Update bounding box coordinates
+                    shape.x1 = shape.centerX - shape.radius;
+                    shape.y1 = shape.centerY - shape.radius;
+                    shape.x2 = shape.centerX + shape.radius;
+                    shape.y2 = shape.centerY + shape.radius;
+                    
+                    // Update handle position in selection box
+                    handle.x = handlePos.x;
+                    handle.y = handlePos.y;
+                    
+                    // Update selection box bounds
+                    this.selectionBox.startX = shape.x1 - 5; // 5px padding
+                    this.selectionBox.startY = shape.y1 - 5;
+                    this.selectionBox.endX = shape.x2 + 5;
+                    this.selectionBox.endY = shape.y2 + 5;
                 }
                 break;
             }
             
-            case 'circle': {
-                // For circle, maintain center and radius approach
-                const sizeDelta = Math.max(Math.abs(dx), Math.abs(dy));
-                const newSize = shape.size + (isLeft || isTop ? -sizeDelta : sizeDelta);
-                shape.size = newSize; // Removed minimum size check
-                if (isLeft) shape.x += dx;
-                if (isTop) shape.y += dy;
+            case 'rectangle':
+            case 'triangle': {
+                if (isLeft && isTop) {
+                    shape.x1 += dx;
+                    shape.y1 += dy;
+                } else if (!isLeft && isTop) {
+                    shape.x2 += dx;
+                    shape.y1 += dy;
+                } else if (isLeft && !isTop) {
+                    shape.x1 += dx;
+                    shape.y2 += dy;
+                } else {
+                    shape.x2 += dx;
+                    shape.y2 += dy;
+                }
                 break;
             }
             
             case 'line': {
-                // Line already uses absolute positioning
                 if (isLeft) {
                     shape.x1 += dx;
                     shape.y1 += dy;

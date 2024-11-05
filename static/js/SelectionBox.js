@@ -73,14 +73,12 @@ export class SelectionBox {
                        Math.min(shape.y1, shape.y2) >= box.top && 
                        Math.max(shape.y1, shape.y2) <= box.bottom;
             
-            case 'circle': {
-                const centerX = shape.x + shape.size;
-                const centerY = shape.y + shape.size;
-                return centerX - shape.size >= box.left &&
-                       centerX + shape.size <= box.right &&
-                       centerY - shape.size >= box.top &&
-                       centerY + shape.size <= box.bottom;
-            }
+            case 'circle':
+                // Update to use centerX/centerY/radius
+                return shape.centerX - shape.radius >= box.left &&
+                       shape.centerX + shape.radius <= box.right &&
+                       shape.centerY - shape.radius >= box.top &&
+                       shape.centerY + shape.radius <= box.bottom;
             
             case 'line':
                 return shape.x1 >= box.left &&
@@ -129,6 +127,7 @@ export class SelectionBox {
         switch(shape.type) {
             case 'rectangle':
             case 'triangle':
+            case 'line':
                 return {
                     left: Math.min(shape.x1, shape.x2),
                     right: Math.max(shape.x1, shape.x2),
@@ -137,19 +136,12 @@ export class SelectionBox {
                 };
 
             case 'circle':
+                // Update to use centerX/centerY/radius
                 return {
-                    left: shape.x,
-                    right: shape.x + shape.size * 2,
-                    top: shape.y,
-                    bottom: shape.y + shape.size * 2
-                };
-
-            case 'line':
-                return {
-                    left: Math.min(shape.x1, shape.x2),
-                    right: Math.max(shape.x1, shape.x2),
-                    top: Math.min(shape.y1, shape.y2),
-                    bottom: Math.max(shape.y1, shape.y2)
+                    left: shape.centerX - shape.radius,
+                    right: shape.centerX + shape.radius,
+                    top: shape.centerY - shape.radius,
+                    bottom: shape.centerY + shape.radius
                 };
 
             default:
@@ -160,6 +152,33 @@ export class SelectionBox {
                     bottom: 0
                 };
         }
+    }
+
+    getHandlePositions() {
+        const bounds = this.getBounds();
+        
+        // Special case for single circle selection
+        if (this.selectedShapes.size === 1) {
+            const shape = Array.from(this.selectedShapes)[0];
+            if (shape.type === 'circle') {
+                // Add single handle at right side of circle
+                return [{
+                    x: shape.centerX + shape.radius,
+                    y: shape.centerY,
+                    cursor: 'ew-resize',
+                    isCircleHandle: true,
+                    shape: shape
+                }];
+            }
+        }
+        
+        // Default rectangle handles for other cases
+        return [
+            { x: bounds.left, y: bounds.top, cursor: 'nw-resize', isLeft: true, isTop: true },
+            { x: bounds.right, y: bounds.top, cursor: 'ne-resize', isLeft: false, isTop: true },
+            { x: bounds.right, y: bounds.bottom, cursor: 'se-resize', isLeft: false, isTop: false },
+            { x: bounds.left, y: bounds.bottom, cursor: 'sw-resize', isLeft: true, isTop: false }
+        ];
     }
 
     draw(ctx) {
@@ -186,27 +205,25 @@ export class SelectionBox {
             ctx.fillStyle = '#ffffff';
             ctx.strokeStyle = '#0066ff';
             
-            // Draw corner handles
             const handles = this.getHandlePositions();
-            handles.forEach(({x, y}) => {
-                ctx.fillRect(x - this.handleSize/2, y - this.handleSize/2, 
-                           this.handleSize, this.handleSize);
-                ctx.strokeRect(x - this.handleSize/2, y - this.handleSize/2, 
-                             this.handleSize, this.handleSize);
+            handles.forEach((handle) => {
+                if (handle.isCircleHandle) {
+                    // Draw circular handle for circle resize
+                    ctx.beginPath();
+                    ctx.arc(handle.x, handle.y, this.handleSize/2, 0, Math.PI * 2);
+                    ctx.fill();
+                    ctx.stroke();
+                } else {
+                    // Draw square handles for other shapes
+                    ctx.fillRect(handle.x - this.handleSize/2, handle.y - this.handleSize/2, 
+                               this.handleSize, this.handleSize);
+                    ctx.strokeRect(handle.x - this.handleSize/2, handle.y - this.handleSize/2, 
+                                 this.handleSize, this.handleSize);
+                }
             });
         }
         
         ctx.restore();
-    }
-
-    getHandlePositions() {
-        const bounds = this.getBounds();
-        return [
-            { x: bounds.left, y: bounds.top, cursor: 'nw-resize', isLeft: true, isTop: true },          // Top-left
-            { x: bounds.right, y: bounds.top, cursor: 'ne-resize', isLeft: false, isTop: true },        // Top-right
-            { x: bounds.right, y: bounds.bottom, cursor: 'se-resize', isLeft: false, isTop: false },    // Bottom-right
-            { x: bounds.left, y: bounds.bottom, cursor: 'sw-resize', isLeft: true, isTop: false }       // Bottom-left
-        ];
     }
 
     getHandleAtPosition(point) {
