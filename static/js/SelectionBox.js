@@ -9,6 +9,10 @@ export class SelectionBox {
         this.isDragging = false;
         this.dragStartX = 0;
         this.dragStartY = 0;
+        this.showResizeHandles = false;
+        this.activeHandle = null;
+        this.handleSize = 8;
+        this.activeHandle = null;  // Track currently active handle
     }
 
     start(x, y) {
@@ -64,10 +68,10 @@ export class SelectionBox {
         switch(shape.type) {
             case 'rectangle':
             case 'triangle':
-                return shape.x >= box.left && 
-                       shape.x + shape.width <= box.right &&
-                       shape.y >= box.top && 
-                       shape.y + shape.height <= box.bottom;
+                return Math.min(shape.x1, shape.x2) >= box.left && 
+                       Math.max(shape.x1, shape.x2) <= box.right &&
+                       Math.min(shape.y1, shape.y2) >= box.top && 
+                       Math.max(shape.y1, shape.y2) <= box.bottom;
             
             case 'circle': {
                 const centerX = shape.x + shape.size;
@@ -126,10 +130,10 @@ export class SelectionBox {
             case 'rectangle':
             case 'triangle':
                 return {
-                    left: shape.x,
-                    right: shape.x + shape.width,
-                    top: shape.y,
-                    bottom: shape.y + shape.height
+                    left: Math.min(shape.x1, shape.x2),
+                    right: Math.max(shape.x1, shape.x2),
+                    top: Math.min(shape.y1, shape.y2),
+                    bottom: Math.max(shape.y1, shape.y2)
                 };
 
             case 'circle':
@@ -175,7 +179,101 @@ export class SelectionBox {
         }
         
         ctx.strokeRect(this.startX, this.startY, width, height);
+
+        // Draw resize handles if enabled
+        if (this.showResizeHandles) {
+            ctx.setLineDash([]); // Solid line for handles
+            ctx.fillStyle = '#ffffff';
+            ctx.strokeStyle = '#0066ff';
+            
+            // Draw corner handles
+            const handles = this.getHandlePositions();
+            handles.forEach(({x, y}) => {
+                ctx.fillRect(x - this.handleSize/2, y - this.handleSize/2, 
+                           this.handleSize, this.handleSize);
+                ctx.strokeRect(x - this.handleSize/2, y - this.handleSize/2, 
+                             this.handleSize, this.handleSize);
+            });
+        }
+        
         ctx.restore();
+    }
+
+    getHandlePositions() {
+        const bounds = this.getBounds();
+        return [
+            { x: bounds.left, y: bounds.top, cursor: 'nw-resize', isLeft: true, isTop: true },          // Top-left
+            { x: bounds.right, y: bounds.top, cursor: 'ne-resize', isLeft: false, isTop: true },        // Top-right
+            { x: bounds.right, y: bounds.bottom, cursor: 'se-resize', isLeft: false, isTop: false },    // Bottom-right
+            { x: bounds.left, y: bounds.bottom, cursor: 'sw-resize', isLeft: true, isTop: false }       // Bottom-left
+        ];
+    }
+
+    getHandleAtPosition(point) {
+        // If there's already an active handle, only return that one
+        if (this.activeHandle) {
+            return this.activeHandle;
+        }
+
+        if (!this.showResizeHandles) return null;
+        
+        const handles = this.getHandlePositions();
+        const tolerance = this.handleSize / 2;
+        
+        // Find the handle closest to the point within tolerance
+        let closestHandle = null;
+        let minDistance = Infinity;
+        
+        for (const handle of handles) {
+            const dx = point.x - handle.x;
+            const dy = point.y - handle.y;
+            const distance = Math.hypot(dx, dy);
+            
+            if (distance <= tolerance && distance < minDistance) {
+                minDistance = distance;
+                closestHandle = handle;
+            }
+        }
+        
+        return closestHandle;
+    }
+
+    // Add methods to manage active handle state
+    setActiveHandle(handle) {
+        this.activeHandle = handle;
+    }
+
+    clearActiveHandle() {
+        this.activeHandle = null;
+    }
+
+    resizeByHandle(handle, mousePos) {
+        if (!handle) return;
+        
+        const bounds = this.getBounds();
+        const isLeft = Math.abs(handle.x - bounds.left) < this.handleSize;
+        const isTop = Math.abs(handle.y - bounds.top) < this.handleSize;
+        
+        const minSize = 5;
+        
+        // When resizing, keep the opposite corner fixed and update only the dragged corner
+        if (isLeft && isTop) {
+            // Top-left: keep bottom-right fixed
+            this.startX = Math.min(bounds.right - minSize, mousePos.x);
+            this.startY = Math.min(bounds.bottom - minSize, mousePos.y);
+        } else if (!isLeft && isTop) {
+            // Top-right: keep bottom-left fixed
+            this.endX = Math.max(bounds.left + minSize, mousePos.x);
+            this.startY = Math.min(bounds.bottom - minSize, mousePos.y);
+        } else if (isLeft && !isTop) {
+            // Bottom-left: keep top-right fixed
+            this.startX = Math.min(bounds.right - minSize, mousePos.x);
+            this.endY = Math.max(bounds.top + minSize, mousePos.y);
+        } else {
+            // Bottom-right: keep top-left fixed
+            this.endX = Math.max(bounds.left + minSize, mousePos.x);
+            this.endY = Math.max(bounds.top + minSize, mousePos.y);
+        }
     }
 
     startDragging(x, y) {

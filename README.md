@@ -10,7 +10,7 @@ Coded by Claude - Sonnet AI
 ## Features
 
 - **Real-time Drawing**: Utilize the HTML5 Canvas for dynamic and responsive drawing experiences.
-- **Multiple Drawing Tools**:
+- **Multiple Drawfing Tools**:
     - **Select Tool**: Select, move, rotate, and resize shapes.
     - **Shape Tools**: Draw rectangles, circles, triangles, and lines with ease.
 - **Layer Management**:
@@ -51,9 +51,11 @@ The application uses a simple text-based language to describe shapes on the canv
 
 ### Shape Types and Parameters
 
-1. **Rectangle**: `rect(x y width height)`
-2. **Circle**: `circ(centerX centerY radius)`
-3. **Triangle**: `tri(x y width height)`
+All shapes use absolute coordinate pairs (x1,y1,x2,y2):
+
+1. **Rectangle**: `rect(x1 y1 x2 y2)`
+2. **Circle**: `circle(x1 y1 x2 y2)` - where x2,y2 defines bounding box
+3. **Triangle**: `tri(x1 y1 x2 y2)` - where x2,y2 defines bounding box
 4. **Line**: `line(x1 y1 x2 y2)`
 
 ### Optional Parameters

@@ -18,6 +18,8 @@ export class CanvasManager {
         this.draggedShape = null;  // Add this line
         this.dragStartPos = null;  // Add this line
         this.keyboardManager = new KeyboardManager(this);
+        this.resizeHandle = null;
+        this.lastMousePos = null;  // Add this line
 
         this.setupEventListeners();
         this.resizeCanvas();
@@ -36,6 +38,7 @@ export class CanvasManager {
         document.addEventListener('mouseup', this.handleMouseUp.bind(this));
         window.addEventListener('resize', this.resizeCanvas.bind(this));
         this.applyButton.addEventListener('click', this.applyCanvasText.bind(this));
+        this.canvas.addEventListener('contextmenu', this.handleContextMenu.bind(this));
     }
 
     startDrawLoop() {
@@ -55,21 +58,24 @@ export class CanvasManager {
         
         // Draw shape preview while drawing
         if (this.state.isDrawing && this.state.startPoint && this.state.lastPoint) {
-            const previewShape = new Shape(this.currentTool, {
-                x: this.state.startPoint.x,
-                y: this.state.startPoint.y,
-                width: this.state.lastPoint.x - this.state.startPoint.x,
-                height: this.state.lastPoint.y - this.state.startPoint.y,
-                size: Math.hypot(
-                    this.state.lastPoint.x - this.state.startPoint.x,
-                    this.state.lastPoint.y - this.state.startPoint.y
-                ) / 2,
-                x1: this.state.startPoint.x,
-                y1: this.state.startPoint.y,
-                x2: this.state.lastPoint.x,
-                y2: this.state.lastPoint.y,
-                color: this.currentColor
-            });
+            let previewShape;
+            if (this.currentTool === 'circle') {
+                previewShape = new Shape(this.currentTool, {
+                    x: this.state.lastPoint.x - this.state.radius,
+                    y: this.state.lastPoint.y - this.state.radius,
+                    size: this.state.radius,
+                    color: this.currentColor
+                });
+            } else {
+                // Fix: Create preview shape using x1,y1,x2,y2 coordinates
+                previewShape = new Shape(this.currentTool, {
+                    x1: this.state.startPoint.x,
+                    y1: this.state.startPoint.y,
+                    x2: this.state.lastPoint.x,
+                    y2: this.state.lastPoint.y,
+                    color: this.currentColor
+                });
+            }
             previewShape.draw(this.ctx, false);
         }
 
@@ -97,179 +103,281 @@ export class CanvasManager {
     }
 
     handleMouseDown(e) {
+        // Ignore right clicks for drawing and selection
+        if (e.button === 2) return;
+        
         const mousePos = this.getMousePos(e);
         
-        if (this.currentTool === 'select') {
-            // Check if clicking on selection box first
-            if (this.selectionBox.containsPoint(mousePos) && this.selectionBox.selectedShapes.size > 0) {
-                this.selectionBox.startDragging(mousePos.x, mousePos.y);
+        // Check for resize handle first, before any other interactions
+        if (this.selectionBox.showResizeHandles) {
+            const handle = this.selectionBox.getHandleAtPosition(mousePos);
+            if (handle) {
+                this.selectionBox.setActiveHandle(handle);  // Set active handle
+                this.lastMousePos = mousePos;  // Store initial mouse position
+                this.canvas.style.cursor = handle.cursor;
+                e.preventDefault(); // Prevent other actions
+                e.stopPropagation();
                 return;
             }
+        }
+        
+        // Only proceed with other actions if we're not resizing
+        if (!this.resizeHandle) {
+            if (this.currentTool === 'select') {
+                // Check if clicking on selection box first
+                if (this.selectionBox.containsPoint(mousePos) && this.selectionBox.selectedShapes.size > 0) {
+                    this.selectionBox.startDragging(mousePos.x, mousePos.y);
+                    return;
+                }
 
-            const clickedShape = this.findShapeAtPoint(mousePos);
-            
-            if (clickedShape) {
-                // Start dragging the clicked shape
-                this.draggedShape = clickedShape;
-                this.dragStartPos = mousePos;
+                const clickedShape = this.findShapeAtPoint(mousePos);
                 
-                // Handle selection
-                if (e.shiftKey) {
-                    if (this.selectionBox.selectedShapes.has(clickedShape)) {
-                        this.selectionBox.selectedShapes.delete(clickedShape);
+                if (clickedShape) {
+                    // Start dragging the clicked shape
+                    this.draggedShape = clickedShape;
+                    this.dragStartPos = mousePos;
+                    
+                    // Handle selection
+                    if (e.shiftKey) {
+                        if (this.selectionBox.selectedShapes.has(clickedShape)) {
+                            this.selectionBox.selectedShapes.delete(clickedShape);
+                        } else {
+                            this.selectionBox.selectedShapes.add(clickedShape);
+                        }
                     } else {
+                        this.selectionBox.selectedShapes.clear();
                         this.selectionBox.selectedShapes.add(clickedShape);
                     }
+                    this.selectionBox.calculateBounds();
                 } else {
-                    this.selectionBox.selectedShapes.clear();
-                    this.selectionBox.selectedShapes.add(clickedShape);
+                    // If clicked empty space, start new selection box
+                    if (!this.selectionBox.containsPoint(mousePos)) {
+                        this.selectionBox.clear();
+                    }
+                    this.selectionBox.start(mousePos.x, mousePos.y);
                 }
-                this.selectionBox.calculateBounds();
-            } else {
-                // If clicked empty space, start new selection box
-                if (!this.selectionBox.containsPoint(mousePos)) {
-                    this.selectionBox.clear();
+                
+                this.render();
+                return;
+            } else if (this.currentTool) {
+                this.state.isDrawing = true;
+                this.state.startPoint = mousePos;
+                this.state.lastPoint = mousePos;
+                if (this.currentTool === 'circle') {
+                    this.state.radius = 0;
                 }
-                this.selectionBox.start(mousePos.x, mousePos.y);
+                this.selectionBox.selectedShapes.clear();
             }
-            
-            this.render();
-            return;
-        }
-
-        if (this.currentTool) {
-            this.state.isDrawing = true;
-            this.state.startPoint = mousePos;
-            this.state.lastPoint = mousePos;
-            this.selectionBox.selectedShapes.clear();
         }
     }
 
     handleMouseMove(e) {
+        if (e.buttons === 2) return;
         const mousePos = this.getMousePos(e);
         
-        if (this.currentTool === 'select') {
-            // Handle shape dragging
-            if (this.draggedShape) {
-                const dx = mousePos.x - this.dragStartPos.x;
-                const dy = mousePos.y - this.dragStartPos.y;
-                this.moveShape(this.draggedShape, dx, dy);
-                this.dragStartPos = mousePos;
-                this.selectionBox.calculateBounds();
-                this.updateCanvasText();
-                this.render();
-                return;
-            }
-
-            const hoveredShape = this.findShapeAtPoint(mousePos);
+        // Handle resize with active handle
+        if (this.selectionBox.activeHandle && this.lastMousePos) {
+            const dx = mousePos.x - this.lastMousePos.x;
+            const dy = mousePos.y - this.lastMousePos.y;
             
-            // Show move cursor if:
-            // 1. Mouse is over the selection box with selected shapes, or
-            // 2. Mouse is over a selected shape, or
-            // 3. Mouse is over any shape that's currently selected
-            if ((this.selectionBox.containsPoint(mousePos) && this.selectionBox.selectedShapes.size > 0) ||
-                (hoveredShape && this.selectionBox.selectedShapes.has(hoveredShape))) {
-                this.canvas.style.cursor = 'move';
-            } else if (hoveredShape) {
-                this.canvas.style.cursor = 'pointer';
+            // Use the isLeft/isTop values from the active handle
+            const isLeft = this.selectionBox.activeHandle.isLeft;
+            const isTop = this.selectionBox.activeHandle.isTop;
+            
+            // Apply resizing to all selected shapes
+            this.selectionBox.selectedShapes.forEach(shape => {
+                this.resizeShape(shape, dx, dy, isLeft, isTop);
+            });
+            
+            // Update selection box
+            if (isLeft) {
+                this.selectionBox.startX += dx;
             } else {
-                this.canvas.style.cursor = 'default';
+                this.selectionBox.endX += dx;
             }
-
-            if (this.selectionBox.isDragging) {
-                const { dx, dy } = this.selectionBox.updateDrag(mousePos.x, mousePos.y);
-                // Move all selected shapes
-                this.selectionBox.selectedShapes.forEach(shape => {
-                    this.moveShape(shape, dx, dy);
-                });
-                this.updateCanvasText(); // Update code view
-                this.render();
-                return;
+            if (isTop) {
+                this.selectionBox.startY += dy;
+            } else {
+                this.selectionBox.endY += dy;
             }
-
-            if (this.selectionBox.isActive) {
-                this.selectionBox.update(mousePos.x, mousePos.y);
-                
-                if (!e.shiftKey) {
-                    this.selectionBox.selectedShapes.clear();
-                }
-                
-                this.shapes.forEach(shape => {
-                    if (this.selectionBox.isShapeFullyInBox(shape)) {
-                        this.selectionBox.selectedShapes.add(shape);
-                    }
-                });
-                
-                this.render();
-            }
+            
+            this.lastMousePos = mousePos;
+            this.updateCanvasText();
+            this.render();
             return;
         }
+        
+        // Update cursor for resize handles
+        if (this.selectionBox.showResizeHandles) {
+            const handle = this.selectionBox.getHandleAtPosition(mousePos);
+            if (handle) {
+                this.canvas.style.cursor = handle.cursor;
+                return;
+            }
+        }
 
-        if (this.state.isDrawing) {
-            this.state.lastPoint = this.getMousePos(e);
+        // Only proceed with other actions if we're not resizing
+        if (!this.resizeHandle) {
+            if (this.currentTool === 'select') {
+                // Handle shape dragging
+                if (this.draggedShape) {
+                    const dx = mousePos.x - this.dragStartPos.x;
+                    const dy = mousePos.y - this.dragStartPos.y;
+                    this.moveShape(this.draggedShape, dx, dy);
+                    this.dragStartPos = mousePos;
+                    this.selectionBox.calculateBounds();
+                    this.updateCanvasText();
+                    this.render();
+                    return;
+                }
+
+                // Check for selection box dragging first
+                if (this.selectionBox.isDragging) {
+                    const { dx, dy } = this.selectionBox.updateDrag(mousePos.x, mousePos.y);
+                    
+                    // Move all selected shapes along with the selection box
+                    this.selectionBox.selectedShapes.forEach(shape => {
+                        if (shape.type === 'circle') {
+                            shape.x += dx;
+                            shape.y += dy;
+                        } else {
+                            shape.x1 += dx;
+                            shape.y1 += dy;
+                            shape.x2 += dx;
+                            shape.y2 += dy;
+                        }
+                    });
+                    
+                    this.updateCanvasText();
+                    this.render();
+                    return;
+                }
+
+                const hoveredShape = this.findShapeAtPoint(mousePos);
+                
+                // Show move cursor if:
+                // 1. Mouse is over the selection box with selected shapes, or
+                // 2. Mouse is over a selected shape, or
+                // 3. Mouse is over any shape that's currently selected
+                if ((this.selectionBox.containsPoint(mousePos) && this.selectionBox.selectedShapes.size > 0) ||
+                    (hoveredShape && this.selectionBox.selectedShapes.has(hoveredShape))) {
+                    this.canvas.style.cursor = 'move';
+                } else if (hoveredShape) {
+                    this.canvas.style.cursor = 'pointer';
+                } else {
+                    this.canvas.style.cursor = 'default';
+                }
+
+                if (this.selectionBox.isDragging) {
+                    const { dx, dy } = this.selectionBox.updateDrag(mousePos.x, mousePos.y);
+                    // Move all selected shapes
+                    this.selectionBox.selectedShapes.forEach(shape => {
+                        this.moveShape(shape, dx, dy);
+                    });
+                    this.updateCanvasText(); // Update code view
+                    this.render();
+                    return;
+                }
+
+                if (this.selectionBox.isActive) {
+                    this.selectionBox.update(mousePos.x, mousePos.y);
+                    
+                    if (!e.shiftKey) {
+                        this.selectionBox.selectedShapes.clear();
+                    }
+                    
+                    this.shapes.forEach(shape => {
+                        if (this.selectionBox.isShapeFullyInBox(shape)) {
+                            this.selectionBox.selectedShapes.add(shape);
+                        }
+                    });
+                    
+                    this.render();
+                }
+                return;
+            }
+
+            if (this.state.isDrawing) {
+                this.state.lastPoint = this.getMousePos(e);
+                if (this.currentTool === 'circle') {
+                    // Calculate radius based on distance from initial click
+                    this.state.radius = Math.hypot(
+                        mousePos.x - this.state.startPoint.x,
+                        mousePos.y - this.state.startPoint.y
+                    );
+                }
+            }
         }
     }
 
     handleMouseUp(e) {
-        if (this.currentTool === 'select') {
-            // Reset dragging state
-            this.draggedShape = null;
-            this.dragStartPos = null;
-
-            if (this.selectionBox.isDragging) {
-                this.selectionBox.stopDragging();
-                return;
-            }
-            if (this.selectionBox.selectedShapes.size > 0) {
-                this.selectionBox.calculateBounds();
-            } else {
-                this.selectionBox.clear();
-            }
-            this.selectionBox.stop();
-            this.render();
+        // Ignore right button mouseup
+        if (e.button === 2) return;
+        
+        // Clear active handle state
+        if (this.selectionBox.activeHandle) {
+            this.selectionBox.clearActiveHandle();
+            this.lastMousePos = null;
+            this.canvas.style.cursor = 'default';
+            e.preventDefault();
+            e.stopPropagation();
             return;
         }
+        
+        // Only proceed with other actions if we weren't resizing
+        if (!this.resizeHandle) {
+            if (this.currentTool === 'select') {
+                // Reset dragging state
+                this.draggedShape = null;
+                this.dragStartPos = null;
 
-        if (this.state.isDrawing && this.state.startPoint && this.state.lastPoint) {
-            let x = this.state.startPoint.x;
-            let y = this.state.startPoint.y;
-            let width = this.state.lastPoint.x - this.state.startPoint.x;
-            let height = this.state.lastPoint.y - this.state.startPoint.y;
-
-            // Normalize rectangle dimensions
-            if (width < 0) {
-                x += width;
-                width = Math.abs(width);
+                if (this.selectionBox.isDragging) {
+                    this.selectionBox.stopDragging();
+                    return;
+                }
+                if (this.selectionBox.selectedShapes.size > 0) {
+                    this.selectionBox.calculateBounds();
+                } else {
+                    this.selectionBox.clear();
+                }
+                this.selectionBox.stop();
+                this.render();
+                return;
             }
-            if (height < 0) {
-                y += height;
-                height = Math.abs(height);
-            }
 
-            const shapeBounds = {
-                x: x,
-                y: y,
-                width: width,
-                height: height,
-                size: Math.hypot(width, height) / 2,
-                x1: this.state.startPoint.x,
-                y1: this.state.startPoint.y,
-                x2: this.state.lastPoint.x,
-                y2: this.state.lastPoint.y,
-                color: this.currentColor
-            };
-            
-            const newShape = new Shape(this.currentTool, shapeBounds);
-            this.shapes.push(newShape);
-            
-            // Select the newly created shape
-            this.selectionBox.selectedShapes.clear();
-            this.selectionBox.selectedShapes.add(newShape);
-            this.selectionBox.calculateBounds();
-            
-            this.updateCanvasText();
+            if (this.state.isDrawing && this.state.startPoint && this.state.lastPoint) {
+                let shapeBounds;
+                
+                if (this.currentTool === 'circle') {
+                    shapeBounds = {
+                        x: this.state.lastPoint.x - this.state.radius,
+                        y: this.state.lastPoint.y - this.state.radius,
+                        size: this.state.radius,
+                        color: this.currentColor
+                    };
+                } else {
+                    // Fix: Use the same coordinate system for final shape as preview
+                    shapeBounds = {
+                        x1: Math.min(this.state.startPoint.x, this.state.lastPoint.x),
+                        y1: Math.min(this.state.startPoint.y, this.state.lastPoint.y),
+                        x2: Math.max(this.state.startPoint.x, this.state.lastPoint.x),
+                        y2: Math.max(this.state.lastPoint.y, this.state.lastPoint.y),
+                        color: this.currentColor
+                    };
+                }
+                
+                const newShape = new Shape(this.currentTool, shapeBounds);
+                this.shapes.push(newShape);
+                
+                // Select the newly created shape
+                this.selectionBox.selectedShapes.clear();
+                this.selectionBox.selectedShapes.add(newShape);
+                this.selectionBox.calculateBounds();
+                
+                this.updateCanvasText();
+            }
+            this.state.reset();
         }
-        this.state.reset();
     }
 
     getMousePos(e) {
@@ -279,7 +387,8 @@ export class CanvasManager {
         const scaleY = this.canvas.height / rect.height;
         return {
             x: ((e.clientX - rect.left) * scaleX - this.state.translate.x) / this.state.scale,
-            y: ((e.clientY - rect.top) * scaleY - this.state.scale)
+            // Fixed y-coordinate calculation
+            y: ((e.clientY - rect.top) * scaleY - this.state.translate.y) / this.state.scale
         };
     }
 
@@ -298,23 +407,18 @@ export class CanvasManager {
         }
     
         const lines = this.shapes.map(shape => {
-            // Format: type(params) [#color] [r<angle>]
             const color = shape.color !== '#e74c3c' ? ` ${shape.color}` : '';
             const rotation = shape.rotation ? ` r${Math.round(shape.rotation * 180 / Math.PI)}` : '';
             
             let code = '';
             switch(shape.type) {
                 case 'rectangle':
-                    code = `rect(${Math.round(shape.x)} ${Math.round(shape.y)} ${Math.round(shape.width)} ${Math.round(shape.height)})${color}${rotation}`;
-                    break;
-                case 'circle':
-                    code = `circ(${Math.round(shape.x + shape.size)} ${Math.round(shape.y + shape.size)} ${Math.round(shape.size)})${color}${rotation}`;
+                    code = `rect(${Math.round(shape.x1)} ${Math.round(shape.y1)} ${Math.round(shape.x2)} ${Math.round(shape.y2)})${color}${rotation}`;
                     break;
                 case 'triangle':
-                    code = `tri(${Math.round(shape.x)} ${Math.round(shape.y)} ${Math.round(shape.width)} ${Math.round(shape.height)})${color}${rotation}`;
-                    break;
+                case 'circle':
                 case 'line':
-                    code = `line(${Math.round(shape.x1)} ${Math.round(shape.y1)} ${Math.round(shape.x2)} ${Math.round(shape.y2)})${color}${rotation}`;
+                    code = `${shape.type}(${Math.round(shape.x1)} ${Math.round(shape.y1)} ${Math.round(shape.x2)} ${Math.round(shape.y2)})${color}${rotation}`;
                     break;
             }
             return `// ${shape.type}\n${code}`;
@@ -351,10 +455,10 @@ export class CanvasManager {
                 switch(type) {
                     case 'rect':
                         shape = new Shape('rectangle', {
-                            x: values[0],
-                            y: values[1],
-                            width: values[2],
-                            height: values[3],
+                            x1: values[0],
+                            y1: values[1],
+                            x2: values[2],
+                            y2: values[3],
                             color: shapeColor
                         });
                         break;
@@ -368,10 +472,10 @@ export class CanvasManager {
                         break;
                     case 'tri':
                         shape = new Shape('triangle', {
-                            x: values[0],
-                            y: values[1],
-                            width: values[2],
-                            height: values[3],
+                            x1: values[0],
+                            y1: values[1],
+                            x2: values[2],
+                            y2: values[3],
                             color: shapeColor
                         });
                         break;
@@ -408,12 +512,8 @@ export class CanvasManager {
     }
 
     isValidShape(shape) {
-        // Add basic shape validation
-        return shape.x != null && 
-               shape.y != null && 
-               (shape.width == null || shape.width >= 0) &&
-               (shape.height == null || shape.height >= 0) &&
-               (shape.size == null || shape.size >= 0);
+        return shape.x1 != null && shape.y1 != null && 
+               shape.x2 != null && shape.y2 != null;
     }
 
     findShapeAtPoint(point) {
@@ -430,12 +530,14 @@ export class CanvasManager {
     isPointInShape(point, shape) {
         switch(shape.type) {
             case 'rectangle':
-                return point.x >= shape.x && 
-                       point.x <= shape.x + shape.width &&
-                       point.y >= shape.y && 
-                       point.y <= shape.y + shape.height;
+            case 'triangle':
+                return point.x >= Math.min(shape.x1, shape.x2) && 
+                       point.x <= Math.max(shape.x1, shape.x2) &&
+                       point.y >= Math.min(shape.y1, shape.y2) && 
+                       point.y <= Math.max(shape.y1, shape.y2);
             
             case 'circle': {
+                // Circle still uses x, y, size format
                 const centerX = shape.x + shape.size;
                 const centerY = shape.y + shape.size;
                 const distance = Math.hypot(point.x - centerX, point.y - centerY);
@@ -444,10 +546,10 @@ export class CanvasManager {
             
             case 'triangle': {
                 // Simplified triangle hit detection using bounding box
-                return point.x >= shape.x && 
-                       point.x <= shape.x + shape.width &&
-                       point.y >= shape.y && 
-                       point.y <= shape.y + shape.height;
+                return point.x >= shape.x1 && 
+                       point.x <= shape.x2 &&
+                       point.y >= shape.y1 && 
+                       point.y <= shape.y2;
             }
             
             case 'line': {
@@ -475,5 +577,108 @@ export class CanvasManager {
             lineEnd.x - lineStart.x
         );
         return numerator / denominator;
+    }
+
+    handleContextMenu(e) {
+        e.preventDefault();
+        e.stopPropagation(); // Prevent event bubbling
+        const mousePos = this.getMousePos(e);
+        
+        // Remove any existing context menus first
+        document.querySelectorAll('.context-menu').forEach(m => m.remove());
+        
+        if (this.selectionBox.containsPoint(mousePos) && this.selectionBox.selectedShapes.size > 0) {
+            const menu = document.createElement('div');
+            menu.className = 'context-menu';
+            menu.style.position = 'absolute';
+            menu.style.left = `${e.clientX}px`;
+            menu.style.top = `${e.clientY}px`;
+            menu.style.display = 'block';
+            menu.innerHTML = `
+                <div class="menu-item" data-action="resize">Resize</div>
+            `;
+
+            // Add event listeners
+            menu.addEventListener('click', (e) => {
+                e.preventDefault();
+                e.stopPropagation();
+                const action = e.target.dataset.action;
+                if (action === 'resize') {
+                    this.selectionBox.showResizeHandles = true;
+                    this.render();
+                }
+                menu.remove();
+            });
+
+            // Close menu when clicking outside
+            const closeMenu = (e) => {
+                if (!menu.contains(e.target)) {
+                    menu.remove();
+                    document.removeEventListener('click', closeMenu);
+                }
+            };
+            
+            // Add the click listener with a small delay to prevent immediate closing
+            setTimeout(() => {
+                document.addEventListener('click', closeMenu);
+            }, 0);
+
+            document.body.appendChild(menu);
+        }
+    }
+
+    resizeShape(shape, dx, dy, isLeft, isTop) {
+        // Log which corner is being moved
+        const corner = `${isTop ? 'Top' : 'Bottom'}-${isLeft ? 'Left' : 'Right'}`;
+        console.log(`Moving ${corner} corner`);
+
+        switch(shape.type) {
+            case 'rectangle':
+            case 'triangle': {
+                // Store original coordinates for logging
+                const before = {x1: shape.x1, y1: shape.y1, x2: shape.x2, y2: shape.y2};
+                
+                if (isLeft && isTop) {
+                    shape.x1 += dx;
+                    shape.y1 += dy;
+                    console.log(`Top-Left: Changed (x1,y1) from (${before.x1},${before.y1}) to (${shape.x1},${shape.y1})`);
+                } else if (!isLeft && isTop) {
+                    shape.x2 += dx;
+                    shape.y1 += dy;
+                    console.log(`Top-Right: Changed (x2,y1) from (${before.x2},${before.y1}) to (${shape.x2},${shape.y1})`);
+                } else if (isLeft && !isTop) {
+                    shape.x1 += dx;
+                    shape.y2 += dy;
+                    console.log(`Bottom-Left: Changed (x1,y2) from (${before.x1},${before.y2}) to (${shape.x1},${shape.y2})`);
+                } else {
+                    shape.x2 += dx;
+                    shape.y2 += dy;
+                    console.log(`Bottom-Right: Changed (x2,y2) from (${before.x2},${before.y2}) to (${shape.x2},${shape.y2})`);
+                }
+                break;
+            }
+            
+            case 'circle': {
+                // For circle, maintain center and radius approach
+                const sizeDelta = Math.max(Math.abs(dx), Math.abs(dy));
+                const newSize = shape.size + (isLeft || isTop ? -sizeDelta : sizeDelta);
+                shape.size = newSize; // Removed minimum size check
+                if (isLeft) shape.x += dx;
+                if (isTop) shape.y += dy;
+                break;
+            }
+            
+            case 'line': {
+                // Line already uses absolute positioning
+                if (isLeft) {
+                    shape.x1 += dx;
+                    shape.y1 += dy;
+                } else {
+                    shape.x2 += dx;
+                    shape.y2 += dy;
+                }
+                break;
+            }
+        }
     }
 }
