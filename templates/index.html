@@ -1,0 +1,54 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Infinite Drawing Canvas</title>
+    <link rel="stylesheet" href="/static/css/styles.css">
+    <script type="module" src="/static/js/script.js"></script>
+</head>
+<body>
+    <div id="toolbox">
+        <div class="tool" data-tool="select">
+            <svg viewBox="0 0 24 24" width="16" height="16">
+                <path fill="currentColor" d="M7,2l12,11.2l-5.8,0.5l3.3,7.3l-2.2,1l-3.2-7.4L7,18.5V2"/>
+            </svg>
+        </div>
+        <div class="shape" data-shape="rectangle">
+            <svg viewBox="0 0 24 24" width="16" height="16">
+                <rect fill="none" stroke="currentColor" stroke-width="2" x="4" y="4" width="16" height="16"/>
+            </svg>
+        </div>
+        <div class="shape" data-shape="circle">
+            <svg viewBox="0 0 24 24" width="16" height="16">
+                <circle fill="none" stroke="currentColor" stroke-width="2" cx="12" cy="12" r="8"/>
+            </svg>
+        </div>
+        <div class="shape" data-shape="triangle">
+            <svg viewBox="0 0 24 24" width="16" height="16">
+                <path fill="none" stroke="currentColor" stroke-width="2" d="M12,4 L20,20 L4,20 Z"/>
+            </svg>
+        </div>
+        <div class="shape" data-shape="line">
+            <svg viewBox="0 0 24 24" width="16" height="16">
+                <line stroke="currentColor" stroke-width="2" x1="4" y1="20" x2="20" y2="4"/>
+            </svg>
+        </div>
+        <div class="tool-divider"></div>
+        <div class="color-tool">
+            <input type="color" id="color-picker" value="#e74c3c">
+        </div>
+    </div>
+    <div id="canvas-container">
+        <canvas id="canvas"></canvas>
+    </div>
+    <div id="canvas-code">
+        <button id="apply-code">Apply</button>
+        <textarea id="canvas-text"></textarea>
+    </div>
+    <div id="context-menu" class="context-menu">
+        <div class="menu-item" data-action="bring-front">Bring to Front</div>
+        <div class="menu-item" data-action="send-back">Send to Back</div>
+    </div>
+</body>
+</html>
