@@ -87,9 +87,9 @@ body {
 /* Tool divider */
 .tool-divider {
     width: 1px;
-    height: 30px;
-    background: rgba(255, 255, 255, 0.2);
-    margin: 0 8px;
+    height: 24px;
+    background-color: #ddd;
+    margin: 4px 8px;
 }
 
 /* Color picker styles */

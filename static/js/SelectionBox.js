@@ -9,10 +9,13 @@ export class SelectionBox {
         this.isDragging = false;
         this.dragStartX = 0;
         this.dragStartY = 0;
-        this.showResizeHandles = false;
+        this.showResizeHandles = false; // Initialize to false
         this.activeHandle = null;
         this.handleSize = 8;
         this.activeHandle = null;  // Track currently active handle
+        this.initialShapePositions = new Map(); // Store initial positions of shapes
+        this.initialBoxPosition = null; // Store initial box position
+        this.initialShapeStates = new Map(); // Add this line
     }
 
     start(x, y) {
@@ -44,6 +47,7 @@ export class SelectionBox {
         this.startY = 0;
         this.endX = 0;
         this.endY = 0;
+        this.showResizeHandles = false; // Reset when clearing selection
     }
 
     getBounds() {
@@ -266,30 +270,48 @@ export class SelectionBox {
 
     resizeByHandle(handle, mousePos) {
         if (!handle) return;
-        
+
+        // Special case for single circle handle
+        if (handle.isCircleHandle && handle.shape) {
+            handle.shape.resizeCircle(mousePos.x, mousePos.y);
+            
+            // Update selection box to match new circle bounds
+            this.startX = handle.shape.x1;
+            this.startY = handle.shape.y1;
+            this.endX = handle.shape.x2;
+            this.endY = handle.shape.y2;
+            return;
+        }
+
+        // Get current bounds before resize
         const bounds = this.getBounds();
-        const isLeft = Math.abs(handle.x - bounds.left) < this.handleSize;
-        const isTop = Math.abs(handle.y - bounds.top) < this.handleSize;
         
+        // Update selection box first
+        this.updateSelectionBoxSize(handle, mousePos);
+
+        // Resize all selected shapes
+        this.selectedShapes.forEach(shape => {
+            if (typeof shape.resize === 'function') {
+                shape.resize(mousePos.x, mousePos.y, handle, bounds);
+            }
+        });
+    }
+
+    updateSelectionBoxSize(handle, mousePos) {
         const minSize = 5;
         
-        // When resizing, keep the opposite corner fixed and update only the dragged corner
-        if (isLeft && isTop) {
-            // Top-left: keep bottom-right fixed
-            this.startX = Math.min(bounds.right - minSize, mousePos.x);
-            this.startY = Math.min(bounds.bottom - minSize, mousePos.y);
-        } else if (!isLeft && isTop) {
-            // Top-right: keep bottom-left fixed
-            this.endX = Math.max(bounds.left + minSize, mousePos.x);
-            this.startY = Math.min(bounds.bottom - minSize, mousePos.y);
-        } else if (isLeft && !isTop) {
-            // Bottom-left: keep top-right fixed
-            this.startX = Math.min(bounds.right - minSize, mousePos.x);
-            this.endY = Math.max(bounds.top + minSize, mousePos.y);
+        if (handle.isLeft && handle.isTop) {
+            this.startX = Math.min(this.endX - minSize, mousePos.x);
+            this.startY = Math.min(this.endY - minSize, mousePos.y);
+        } else if (!handle.isLeft && handle.isTop) {
+            this.endX = Math.max(this.startX + minSize, mousePos.x);
+            this.startY = Math.min(this.endY - minSize, mousePos.y);
+        } else if (handle.isLeft && !handle.isTop) {
+            this.startX = Math.min(this.endX - minSize, mousePos.x);
+            this.endY = Math.max(this.startY + minSize, mousePos.y);
         } else {
-            // Bottom-right: keep top-left fixed
-            this.endX = Math.max(bounds.left + minSize, mousePos.x);
-            this.endY = Math.max(bounds.top + minSize, mousePos.y);
+            this.endX = Math.max(this.startX + minSize, mousePos.x);
+            this.endY = Math.max(this.startY + minSize, mousePos.y);
         }
     }
 
@@ -297,28 +319,118 @@ export class SelectionBox {
         this.isDragging = true;
         this.dragStartX = x;
         this.dragStartY = y;
+        
+        // Store initial positions as absolute values
+        this.initialBoxPosition = {
+            startX: this.startX,
+            startY: this.startY,
+            endX: this.endX,
+            endY: this.endY
+        };
+
+        // Store initial positions of all selected shapes
+        this.initialShapePositions.clear();
+        this.selectedShapes.forEach(shape => {
+            // Store all relevant coordinates for each shape type
+            if (shape.type === 'circle') {
+                this.initialShapePositions.set(shape, {
+                    centerX: shape.centerX,
+                    centerY: shape.centerY,
+                    radius: shape.radius
+                });
+            } else {
+                this.initialShapePositions.set(shape, {
+                    x1: shape.x1,
+                    y1: shape.y1,
+                    x2: shape.x2,
+                    y2: shape.y2
+                });
+            }
+        });
     }
 
     updateDrag(x, y) {
-        if (!this.isDragging) return;
+        if (!this.isDragging || !this.initialBoxPosition) return null;
         
+        // Calculate exact movement delta
         const dx = x - this.dragStartX;
         const dy = y - this.dragStartY;
 
-        // Update selection box position
-        this.startX += dx;
-        this.startY += dy;
-        this.endX += dx;
-        this.endY += dy;
+        // Update selection box using initial position
+        this.startX = this.initialBoxPosition.startX + dx;
+        this.startY = this.initialBoxPosition.startY + dy;
+        this.endX = this.initialBoxPosition.endX + dx;
+        this.endY = this.initialBoxPosition.endY + dy;
 
-        // Update drag start position
-        this.dragStartX = x;
-        this.dragStartY = y;
+        // Update all shapes using their initial positions
+        this.selectedShapes.forEach(shape => {
+            const initialPos = this.initialShapePositions.get(shape);
+            if (!initialPos) return;
 
+            if (shape.type === 'circle') {
+                shape.centerX = initialPos.centerX + dx;
+                shape.centerY = initialPos.centerY + dy;
+                // Update bounding box coordinates
+                shape.x1 = shape.centerX - initialPos.radius;
+                shape.y1 = shape.centerY - initialPos.radius;
+                shape.x2 = shape.centerX + initialPos.radius;
+                shape.y2 = shape.centerY + initialPos.radius;
+            } else {
+                shape.x1 = initialPos.x1 + dx;
+                shape.y1 = initialPos.y1 + dy;
+                shape.x2 = initialPos.x2 + dx;
+                shape.y2 = initialPos.y2 + dy;
+            }
+        });
+
+        // Return movement delta for additional processing if needed
         return { dx, dy };
     }
 
     stopDragging() {
         this.isDragging = false;
+        this.initialShapePositions.clear();
+        this.initialBoxPosition = null;
+    }
+
+    startResize() {
+        // Store initial states of all selected shapes and the selection box
+        this.initialShapeStates.clear();
+        this.initialBoxBounds = this.getBounds();
+        
+        this.selectedShapes.forEach(shape => {
+            if (shape.type === 'circle') {
+                this.initialShapeStates.set(shape, {
+                    centerX: shape.centerX,
+                    centerY: shape.centerY,
+                    radius: shape.radius,
+                    type: 'circle'
+                });
+            } else {
+                this.initialShapeStates.set(shape, {
+                    x1: shape.x1,
+                    y1: shape.y1,
+                    x2: shape.x2,
+                    y2: shape.y2,
+                    type: shape.type
+                });
+            }
+        });
+    }
+
+    getInitialState(shape) {
+        return this.initialShapeStates.get(shape);
+    }
+
+    getInitialGroupBounds() {
+        if (this.initialBoxBounds) {
+            return this.initialBoxBounds;
+        }
+        return this.getBounds();
+    }
+
+    clearResize() {
+        this.initialShapeStates.clear();
+        this.initialBoxBounds = null;
     }
 }
